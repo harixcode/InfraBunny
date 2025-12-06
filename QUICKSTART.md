@@ -1,150 +1,241 @@
-# 🚀 Quick Start Guide
+# InfraBunny - Quick Start Guide
 
-## Setup (5 minutes)
+Get your cloud resource visualizer running in 5 minutes!
+
+## 🚀 Local Development Setup
+
+### 1. Install Dependencies
 
 ```bash
-# 1. Install dependencies
 npm install
-
-# 2. Setup database
-npx prisma generate
-npx prisma db push
-
-# 3. Load demo data
-npm run db:seed
-
-# 4. Start the app
-npm run dev
 ```
 
-## Open http://localhost:3000
+### 2. Set Up Database (Choose One)
 
-## 🎯 Demo Flow
+#### Option A: Supabase (Recommended - Cloud PostgreSQL)
 
-### 1. **View E-commerce Infrastructure**
-   - Click "ecommerce-platform" in sidebar
-   - See VPC, subnets, EC2 instances, RDS, S3
-   - Interactive graph with relationships
+1. Create account at [supabase.com](https://supabase.com)
+2. Create new project
+3. Get connection string from Settings → Database
+4. Create `.env` file:
 
-### 2. **Inspect a Resource**
-   - Click any node (e.g., "Web Server 1")
-   - Right panel shows full configuration
-   - View tags, attributes, dependencies
+```bash
+DATABASE_URL="postgresql://postgres:[YOUR-PASSWORD]@db.xxxxx.supabase.co:5432/postgres"
+```
 
-### 3. **Compare Versions**
-   - Select second version in "Compare With" dropdown
-   - See highlighted changes:
-     - 🟢 New "Web Server 3" added
-     - 🟡 VPC modified (new tag)
-     - 🟡 Database upgraded
+See `SUPABASE_SETUP.md` for detailed instructions.
 
-### 4. **View Detailed Changes**
-   - Click the yellow VPC node
-   - See diff:
-     - ✅ Added: `CostCenter: engineering`
-   - Click yellow database node
-   - See diff:
-     - 📝 Modified: `engine_version: 15.4 → 15.5`
-     - 📝 Modified: `instance_class: t3.large → t3.xlarge`
-     - 📝 Modified: `allocated_storage: 100 → 150`
+#### Option B: Local SQLite (Quick Test)
 
-### 5. **Switch to Analytics**
-   - Click "analytics-platform"
-   - See serverless architecture
-   - Lambda, DynamoDB, API Gateway, S3
+Change `prisma/schema.prisma`:
 
-## 🎓 Key Features to Highlight
-
-1. **No AWS Account**: Uses mock Terraform state files
-2. **Real-time Visualization**: Interactive graph with zoom/pan
-3. **Change Detection**: Automatic diff between versions
-4. **Multi-Project**: Tag-based project organization
-5. **Version History**: Track infrastructure over time
-
-## 🛠️ Mock Data Location
-
-- `mock-data/ecommerce-v1.tfstate.json` - Initial state
-- `mock-data/ecommerce-v2.tfstate.json` - After changes
-- `mock-data/analytics-v1.tfstate.json` - Serverless project
-
-## 📝 Adding Your Own Data
-
-Create a new Terraform state file:
-
-```json
-{
-  "version": 4,
-  "terraform_version": "1.6.0",
-  "resources": [
-    {
-      "type": "aws_vpc",
-      "name": "main",
-      "instances": [{
-        "attributes": {
-          "id": "vpc-xxx",
-          "tags": {
-            "Project": "your-project-name"
-          }
-        }
-      }]
-    }
-  ]
+```prisma
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 ```
 
-Import via API:
+### 3. Initialize Database
+
 ```bash
-curl -X POST http://localhost:3000/api/snapshots \
-  -H "Content-Type: application/json" \
-  -d '{"projectName": "your-project", "terraformState": {...}}'
-```
+# Generate Prisma client
+npx prisma generate
 
-## 🎨 Color Legend
-
-- 🔵 Blue: VPC
-- 🟣 Purple: Subnets, RDS
-- 🟠 Orange: Security Groups
-- 🩷 Pink: EC2 Instances
-- 🟢 Green: S3, Added Resources
-- 🟡 Yellow: Lambda, Modified Resources
-- 🔴 Red: Deleted Resources
-
-## 🎤 Presentation Tips
-
-1. Start with dashboard overview
-2. Show project switching
-3. Demonstrate resource inspection
-4. Compare versions to show change tracking
-5. Highlight "no AWS needed" approach
-6. Show code structure (Next.js + React Flow)
-
-## 🐛 Troubleshooting
-
-**Port 3000 already in use?**
-```bash
-lsof -ti:3000 | xargs kill -9
-npm run dev
-```
-
-**Database issues?**
-```bash
-rm prisma/dev.db
+# Create tables
 npx prisma db push
+
+# Load sample data
 npm run db:seed
 ```
 
-**Module not found?**
-```bash
-rm -rf node_modules package-lock.json
-npm install
+Expected output:
+```
+Starting seed...
+Created e-commerce v1 snapshot: ...
+Created e-commerce v2 snapshot: ...
+Created e-commerce v3 snapshot: ...
+Created analytics v1 snapshot: ...
+Seed completed successfully!
+Total snapshots: 4
+Total resources: 30
 ```
 
-## 🚀 Production Build
+### 4. Start Development Server
 
 ```bash
-npm run build
-npm start
+npm run dev
 ```
 
-Ready to impress! 🎉
+Visit **http://localhost:3000** 🎉
 
+## 🎯 What You'll See
+
+### Default Projects
+
+1. **ecommerce-platform** (3 versions)
+   - VPC with subnets
+   - EC2 instances
+   - Load balancer
+   - RDS database
+   - Security groups
+   - S3 bucket
+
+2. **analytics-platform** (1 version)
+   - Lambda functions
+   - DynamoDB tables
+   - API Gateway
+   - S3 buckets
+   - IAM roles
+
+### Key Features to Try
+
+✅ **Switch between projects** - Click project names in sidebar
+
+✅ **View version history** - See different snapshots in timeline
+
+✅ **Compare versions** - Automatic comparison shows:
+- 🟢 Green border = Added
+- 🟡 Yellow border = Modified
+- 🔴 Red border = Deleted
+
+✅ **Explore resources** - Click any resource to see full configuration
+
+✅ **Dependency visualization** - Arrows show relationships:
+- 🛡️ Orange = Security groups
+- 🔗 Purple = Subnet connections
+- ➡️ Gray dashed = Explicit dependencies
+
+✅ **Architecture view** - Resources nested inside VPCs and Subnets
+
+## 📁 Project Structure
+
+```
+InfraBunny/
+├── app/
+│   ├── page.tsx              # Main UI
+│   └── api/                  # Backend endpoints
+│       ├── projects/
+│       ├── snapshots/
+│       └── compare/
+├── components/
+│   ├── ResourceGraph.tsx     # Diagram visualization
+│   ├── ResourceDetail.tsx    # Resource info panel
+│   └── ChangesPanel.tsx      # Change summary modal
+├── lib/
+│   ├── prisma.ts            # Database client
+│   └── terraform-parser.ts  # TF state parser
+├── mock-data/               # Sample Terraform states
+│   ├── ecommerce-v1.tfstate.json
+│   ├── ecommerce-v2.tfstate.json
+│   ├── ecommerce-v3.tfstate.json
+│   └── analytics-v1.tfstate.json
+├── prisma/
+│   ├── schema.prisma        # Database schema
+│   └── seed.ts              # Data seeder
+└── README.md                # Full documentation
+```
+
+## 🔧 Common Commands
+
+```bash
+# Development
+npm run dev              # Start dev server
+npm run build           # Build for production
+npm run start           # Start production server
+
+# Database
+npx prisma generate     # Generate Prisma client
+npx prisma db push      # Push schema changes
+npm run db:seed         # Load sample data
+npx prisma studio       # Open database GUI
+
+# Linting
+npm run lint            # Check code quality
+```
+
+## 🐛 Troubleshooting
+
+### "Can't reach database server"
+- ✅ Check `.env` file exists with `DATABASE_URL`
+- ✅ Verify connection string is correct
+- ✅ For Supabase: confirm password is correct
+
+### "No projects showing"
+- ✅ Run `npm run db:seed` to load sample data
+- ✅ Check browser console for errors
+- ✅ Verify API is working: `curl http://localhost:3000/api/projects`
+
+### "Prisma Client Not Found"
+```bash
+npx prisma generate
+```
+
+### Port 3000 already in use
+```bash
+# Kill process on port 3000
+lsof -ti:3000 | xargs kill -9
+
+# Or use different port
+PORT=3001 npm run dev
+```
+
+## 📦 Adding Your Own Data
+
+### Via API
+
+```bash
+curl -X POST http://localhost:3000/api/snapshots \
+  -H "Content-Type: application/json" \
+  -d '{
+    "projectName": "my-project",
+    "terraformState": { ... your terraform state ... }
+  }'
+```
+
+### Via Seed Script
+
+1. Add your `.tfstate.json` file to `mock-data/`
+2. Update `prisma/seed.ts` to include it
+3. Run `npm run db:seed`
+
+## 🚀 Deploy to Production
+
+See **DEPLOYMENT.md** for Vercel deployment guide.
+
+See **SUPABASE_SETUP.md** for database setup.
+
+## 📚 Learn More
+
+- [Next.js Documentation](https://nextjs.org/docs)
+- [Prisma Documentation](https://www.prisma.io/docs)
+- [React Flow Documentation](https://reactflow.dev)
+- [Terraform State Format](https://www.terraform.io/docs/language/state/index.html)
+
+## 🎓 Hackathon Presentation Tips
+
+1. **Start with the problem**: "Management can't see what cloud resources exist"
+2. **Show the solution**: Live demo switching between projects
+3. **Highlight change tracking**: Show version comparison with colored borders
+4. **Explain the architecture**: VPC nesting, automatic dependencies
+5. **Discuss scalability**: Works with any Terraform-managed infrastructure
+
+## 🤝 Contributing
+
+This is a hackathon project, but feel free to:
+- Add new resource type icons
+- Improve visualization layout
+- Add more sample data
+- Enhance change detection
+
+## 📄 License
+
+MIT License - Use freely for your projects!
+
+---
+
+**Need help?** Check:
+- `README.md` - Full documentation
+- `SUPABASE_SETUP.md` - Database setup
+- `DEPLOYMENT.md` - Deployment guide
+- `FEATURES.md` - Feature overview
