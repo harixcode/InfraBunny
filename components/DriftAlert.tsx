@@ -31,9 +31,13 @@ export default function DriftAlert({ driftEvents, allDriftEvents, onAcknowledge,
   const [showHistory, setShowHistory] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   
-  const openEvents = driftEvents.filter(e => e.status === 'open');
-  const acknowledgedEvents = allDriftEvents.filter(e => e.status === 'acknowledged');
-  const displayEvents = showHistory ? allDriftEvents : openEvents;
+  // Ensure we're working with arrays
+  const safeDriftEvents = Array.isArray(driftEvents) ? driftEvents : [];
+  const safeAllDriftEvents = Array.isArray(allDriftEvents) ? allDriftEvents : [];
+  
+  const openEvents = safeDriftEvents.filter(e => e.status === 'open');
+  const acknowledgedEvents = safeAllDriftEvents.filter(e => e.status === 'acknowledged');
+  const displayEvents = showHistory ? safeAllDriftEvents : openEvents;
 
   const handleAcknowledgeAll = () => {
     const ids = openEvents.map(e => e.id);
@@ -64,7 +68,7 @@ export default function DriftAlert({ driftEvents, allDriftEvents, onAcknowledge,
   };
 
   // Show nothing if no events at all
-  if (allDriftEvents.length === 0) {
+  if (safeAllDriftEvents.length === 0) {
     return null;
   }
 

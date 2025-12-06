@@ -154,14 +154,19 @@ export default function Home() {
       // Fetch open events
       const openRes = await fetch(`/api/drift?project=${encodeURIComponent(projectName)}&status=open`);
       const openData = await openRes.json();
-      setDriftEvents(openData);
+      // Ensure it's an array
+      setDriftEvents(Array.isArray(openData) ? openData : []);
       
       // Fetch all events (for history)
       const allRes = await fetch(`/api/drift?project=${encodeURIComponent(projectName)}`);
       const allData = await allRes.json();
-      setAllDriftEvents(allData);
+      // Ensure it's an array
+      setAllDriftEvents(Array.isArray(allData) ? allData : []);
     } catch (error) {
       console.error('Failed to fetch drift events:', error);
+      // Set empty arrays on error
+      setDriftEvents([]);
+      setAllDriftEvents([]);
     }
   };
 

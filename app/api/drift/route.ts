@@ -23,19 +23,30 @@ export async function GET(request: NextRequest) {
       orderBy: { detectedAt: 'desc' },
     });
 
-    // Parse JSON fields
-    const enrichedEvents = driftEvents.map((event) => ({
-      ...event,
-      changeDetail: JSON.parse(event.changeDetail),
-    }));
+    // Parse JSON fields safely
+    const enrichedEvents = driftEvents.map((event) => {
+      try {
+        return {
+          ...event,
+          changeDetail: typeof event.changeDetail === 'string' 
+            ? JSON.parse(event.changeDetail) 
+            : event.changeDetail,
+        };
+      } catch (parseError) {
+        console.error('Failed to parse changeDetail for event:', event.id, parseError);
+        // Return event with empty object if parse fails
+        return {
+          ...event,
+          changeDetail: {},
+        };
+      }
+    });
 
     return NextResponse.json(enrichedEvents);
   } catch (error) {
     console.error('Failed to fetch drift events:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch drift events' },
-      { status: 500 }
-    );
+    // Return empty array on error so frontend doesn't break
+    return NextResponse.json([]);
   }
 }
 

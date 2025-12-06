@@ -1,0 +1,19 @@
+
+/api/drift?project=analytics-platform&status=open:1   Failed to load resource: the server responded with a status of 500 ()
+117-94db142d8e523404.js:1  TypeError: s.filter is not a function
+    at h (page-4581bd391693a475.js:1:21423)
+    at rE (fd9d1056-f11596a174a791a5.js:1:40341)
+    at l$ (fd9d1056-f11596a174a791a5.js:1:59316)
+    at iZ (fd9d1056-f11596a174a791a5.js:1:117923)
+    at ia (fd9d1056-f11596a174a791a5.js:1:95162)
+    at fd9d1056-f11596a174a791a5.js:1:94984
+    at il (fd9d1056-f11596a174a791a5.js:1:94991)
+    at oJ (fd9d1056-f11596a174a791a5.js:1:92347)
+    at oZ (fd9d1056-f11596a174a791a5.js:1:91766)
+    at MessagePort.M (117-94db142d8e523404.js:1:84770)
+push.2304.window.console.error @ 117-94db142d8e523404.js:1
+[NEW] Explain Console errors by using Copilot in Edge: click
+         
+         to explain an error. 
+        Learn more
+        Don't show again
