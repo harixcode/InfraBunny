@@ -1,0 +1,63 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Snapshot {
+  id            String     @id @default(uuid())
+  projectName   String
+  createdAt     DateTime   @default(now())
+  terraformState String    // JSON string of the full terraform state
+  resources     Resource[]
+  changesFrom   Change[]   @relation("FromSnapshot")
+  changesTo     Change[]   @relation("ToSnapshot")
+
+  @@index([projectName])
+  @@index([createdAt])
+}
+
+model Resource {
+  id           String   @id @default(uuid())
+  snapshotId   String
+  snapshot     Snapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  
+  resourceType String   // e.g., "aws_vpc", "aws_ec2_instance"
+  resourceName String   // e.g., "main", "web_server_1"
+  resourceId   String   // e.g., "vpc-abc123"
+  
+  attributes   String   // JSON string of all attributes
+  tags         String?  // JSON string of tags
+  dependencies String?  // JSON array of dependency resource addresses
+  
+  changes      Change[]
+
+  @@index([snapshotId])
+  @@index([resourceType])
+}
+
+model Change {
+  id              String   @id @default(uuid())
+  fromSnapshotId  String
+  toSnapshotId    String
+  resourceId      String?  // null if resource was deleted
+  
+  fromSnapshot    Snapshot @relation("FromSnapshot", fields: [fromSnapshotId], references: [id], onDelete: Cascade)
+  toSnapshot      Snapshot @relation("ToSnapshot", fields: [toSnapshotId], references: [id], onDelete: Cascade)
+  resource        Resource? @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  
+  changeType      String   // "added", "modified", "deleted"
+  diff            String?  // JSON string of the differences
+  
+  createdAt       DateTime @default(now())
+
+  @@index([fromSnapshotId])
+  @@index([toSnapshotId])
+}
+
