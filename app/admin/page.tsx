@@ -2,6 +2,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { deploymentTemplates, DeploymentTemplate } from '@/lib/deployment-templates';
+import Logo from '@/components/Logo';
 
 interface Project {
   name: string;
@@ -20,11 +23,18 @@ export default function AdminPage() {
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [resources, setResources] = useState<Resource[]>([]);
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
+  const [activeTab, setActiveTab] = useState<'drift' | 'deployment'>('deployment');
   
   const [formData, setFormData] = useState({
     modifiedBy: 'bob@company.com',
     changeType: 'security_group_modified',
     changeDescription: '',
+  });
+
+  const [deploymentForm, setDeploymentForm] = useState({
+    deployedBy: 'alice@company.com',
+    templateId: deploymentTemplates[0]?.id || '',
+    deploymentNotes: '',
   });
 
   const [loading, setLoading] = useState(false);
@@ -115,10 +125,49 @@ export default function AdminPage() {
       if (res.ok) {
         setMessage({ type: 'success', text: '✅ Drift event created successfully!' });
         setTimeout(() => {
-          router.push('/');
+          router.push('/dashboard');
         }, 1500);
       } else {
         setMessage({ type: 'error', text: 'Failed to create drift event' });
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setMessage({ type: 'error', text: 'An error occurred' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSimulateDeployment = async () => {
+    if (!selectedProject || !deploymentForm.templateId) {
+      setMessage({ type: 'error', text: 'Please select a project and template' });
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const res = await fetch('/api/deployment/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectName: selectedProject,
+          templateId: deploymentForm.templateId,
+          deployedBy: deploymentForm.deployedBy,
+          deploymentNotes: deploymentForm.deploymentNotes,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setMessage({ type: 'success', text: `✅ Deployment simulated! Created version with ${data.snapshot.resourceCount} resources` });
+        setTimeout(() => {
+          router.push('/dashboard');
+        }, 2000);
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Failed to simulate deployment' });
       }
     } catch (error) {
       console.error('Error:', error);
@@ -203,15 +252,15 @@ export default function AdminPage() {
       <header className="bg-white border-b border-gray-200 shadow-sm">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="text-3xl">🐰</div>
+            <Link href="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity cursor-pointer">
+              <Logo size={48} />
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">InfraBunny Admin</h1>
-                <p className="text-sm text-gray-600">Drift Detection Simulator</p>
+                <p className="text-sm text-gray-600">Deployment & Drift Simulator</p>
               </div>
-            </div>
+            </Link>
             <button
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/dashboard')}
               className="text-gray-600 hover:text-gray-900 transition-colors"
             >
               ← Back to Dashboard
@@ -222,47 +271,202 @@ export default function AdminPage() {
 
       {/* Main Content */}
       <div className="max-w-4xl mx-auto p-6">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="mb-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">
-              Simulate AWS Console Change
-            </h2>
-            <p className="text-sm text-gray-600">
-              Create a simulated drift event to demonstrate how InfraBunny detects manual changes
-              made outside of Terraform.
-            </p>
-          </div>
-
-          {message && (
-            <div
-              className={`mb-6 p-4 rounded-lg ${
-                message.type === 'success'
-                  ? 'bg-green-50 text-green-800 border border-green-200'
-                  : 'bg-red-50 text-red-800 border border-red-200'
-              }`}
-            >
-              {message.text}
-            </div>
-          )}
-
-          <div className="space-y-6">
-            {/* Project Selection */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Project
-              </label>
-              <select
-                value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-medium"
+        {/* Tabs */}
+        <div className="mb-6">
+          <div className="border-b border-gray-200">
+            <nav className="-mb-px flex space-x-8">
+              <button
+                onClick={() => setActiveTab('deployment')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'deployment'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
               >
-                {projects.map((project) => (
-                  <option key={project.name} value={project.name}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+                📦 Simulate Deployment
+              </button>
+              <button
+                onClick={() => setActiveTab('drift')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'drift'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                ⚠️ Simulate Drift
+              </button>
+            </nav>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-md p-6">
+          {activeTab === 'deployment' ? (
+            <>
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                  Simulate CI/CD Deployment
+                </h2>
+                <p className="text-sm text-gray-600">
+                  Simulate a deployment that creates a new infrastructure version, as if triggered by your CI/CD pipeline.
+                </p>
+              </div>
+
+              {message && (
+                <div
+                  className={`mb-6 p-4 rounded-lg ${
+                    message.type === 'success'
+                      ? 'bg-green-50 text-green-800 border border-green-200'
+                      : 'bg-red-50 text-red-800 border border-red-200'
+                  }`}
+                >
+                  {message.text}
+                </div>
+              )}
+
+              <div className="space-y-6">
+                {/* Project Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Project
+                  </label>
+                  <select
+                    value={selectedProject}
+                    onChange={(e) => setSelectedProject(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-medium"
+                  >
+                    {projects.map((project) => (
+                      <option key={project.name} value={project.name}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Deployed By */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Deployed By (User Email)
+                  </label>
+                  <input
+                    type="email"
+                    value={deploymentForm.deployedBy}
+                    onChange={(e) => setDeploymentForm({ ...deploymentForm, deployedBy: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-medium"
+                    placeholder="alice@company.com"
+                  />
+                </div>
+
+                {/* Deployment Template */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Deployment Type
+                  </label>
+                  <div className="space-y-3">
+                    {deploymentTemplates.map((template) => (
+                      <div
+                        key={template.id}
+                        onClick={() => setDeploymentForm({ ...deploymentForm, templateId: template.id })}
+                        className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                          deploymentForm.templateId === template.id
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-gray-200 hover:border-blue-300'
+                        }`}
+                      >
+                        <div className="flex items-start space-x-3">
+                          <span className="text-2xl">{template.icon}</span>
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-gray-900">{template.name}</h3>
+                            <p className="text-sm text-gray-600 mt-1">{template.description}</p>
+                            <ul className="mt-2 space-y-1">
+                              {template.changes.map((change, idx) => (
+                                <li key={idx} className="text-xs text-gray-500">• {change}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Deployment Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Deployment Notes (Optional)
+                  </label>
+                  <textarea
+                    value={deploymentForm.deploymentNotes}
+                    onChange={(e) => setDeploymentForm({ ...deploymentForm, deploymentNotes: e.target.value })}
+                    rows={2}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-medium"
+                    placeholder="e.g., Scaling for Black Friday traffic..."
+                  />
+                </div>
+
+                {/* Submit Button */}
+                <div className="flex justify-end space-x-3 pt-4 border-t">
+                  <button
+                    onClick={() => router.push('/dashboard')}
+                    className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSimulateDeployment}
+                    disabled={loading || !selectedProject}
+                    className={`px-6 py-2 text-white rounded-lg transition-colors ${
+                      loading || !selectedProject
+                        ? 'bg-gray-400 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  >
+                    {loading ? 'Deploying...' : '🚀 Simulate Deployment'}
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                  Simulate AWS Console Change
+                </h2>
+                <p className="text-sm text-gray-600">
+                  Create a simulated drift event to demonstrate how InfraBunny detects manual changes
+                  made outside of Terraform.
+                </p>
+              </div>
+
+              {message && (
+                <div
+                  className={`mb-6 p-4 rounded-lg ${
+                    message.type === 'success'
+                      ? 'bg-green-50 text-green-800 border border-green-200'
+                      : 'bg-red-50 text-red-800 border border-red-200'
+                  }`}
+                >
+                  {message.text}
+                </div>
+              )}
+
+              <div className="space-y-6">
+                {/* Project Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Project
+                  </label>
+                  <select
+                    value={selectedProject}
+                    onChange={(e) => setSelectedProject(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-medium"
+                  >
+                    {projects.map((project) => (
+                      <option key={project.name} value={project.name}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
             {/* Resource Selection */}
             <div>
@@ -339,27 +543,29 @@ export default function AdminPage() {
               </p>
             </div>
 
-            {/* Submit Button */}
-            <div className="flex justify-end space-x-3 pt-4 border-t">
-              <button
-                onClick={() => router.push('/')}
-                className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSimulateDrift}
-                disabled={loading || !selectedResource}
-                className={`px-6 py-2 text-white rounded-lg transition-colors ${
-                  loading || !selectedResource
-                    ? 'bg-gray-400 cursor-not-allowed'
-                    : 'bg-orange-600 hover:bg-orange-700'
-                }`}
-              >
-                {loading ? 'Creating...' : '⚠️ Simulate Drift Event'}
-              </button>
-            </div>
-          </div>
+                {/* Submit Button */}
+                <div className="flex justify-end space-x-3 pt-4 border-t">
+                  <button
+                    onClick={() => router.push('/dashboard')}
+                    className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSimulateDrift}
+                    disabled={loading || !selectedResource}
+                    className={`px-6 py-2 text-white rounded-lg transition-colors ${
+                      loading || !selectedResource
+                        ? 'bg-gray-400 cursor-not-allowed'
+                        : 'bg-orange-600 hover:bg-orange-700'
+                    }`}
+                  >
+                    {loading ? 'Creating...' : '⚠️ Simulate Drift Event'}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Info Box */}
@@ -371,10 +577,21 @@ export default function AdminPage() {
             How This Works
           </h3>
           <ul className="text-sm text-blue-800 space-y-1 ml-7">
-            <li>• This simulates someone making a manual change in AWS Console</li>
-            <li>• In production, this would be detected automatically via CloudTrail</li>
-            <li>• The drift event will appear on the main dashboard</li>
-            <li>• Management will see who made the change, when, and what was modified</li>
+            {activeTab === 'deployment' ? (
+              <>
+                <li>• Simulates a CI/CD pipeline deploying infrastructure changes</li>
+                <li>• Creates a new version in the version history timeline</li>
+                <li>• In production, this would be triggered by GitHub Actions or GitLab CI</li>
+                <li>• The dashboard shows what was deployed, when, and by whom</li>
+              </>
+            ) : (
+              <>
+                <li>• This simulates someone making a manual change in AWS Console</li>
+                <li>• In production, this would be detected automatically via CloudTrail</li>
+                <li>• The drift event will appear on the main dashboard</li>
+                <li>• You'll see who made the change, when, and what was modified</li>
+              </>
+            )}
           </ul>
         </div>
       </div>

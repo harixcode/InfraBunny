@@ -1,614 +1,570 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import ResourceGraph from '@/components/ResourceGraph';
-import ResourceDetail from '@/components/ResourceDetail';
-import ChangesPanel from '@/components/ChangesPanel';
-import DriftAlert from '@/components/DriftAlert';
-import DriftDetailModal from '@/components/DriftDetailModal';
-import { formatDistanceToNow } from 'date-fns';
+import React from 'react';
+import Logo from '@/components/Logo';
+import Link from 'next/link';
 
-interface Project {
-  name: string;
-  snapshotCount: number;
-  lastUpdated: string;
-}
-
-interface Snapshot {
-  id: string;
-  projectName: string;
-  createdAt: string;
-  _count?: {
-    resources: number;
-  };
-}
-
-interface Resource {
-  id: string;
-  resourceType: string;
-  resourceName: string;
-  resourceId: string;
-  attributes: any;
-  tags: any;
-  dependencies: string[] | null;
-}
-
-interface SnapshotDetail extends Snapshot {
-  resources: Resource[];
-}
-
-export default function Home() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-  const [selectedSnapshot, setSelectedSnapshot] = useState<SnapshotDetail | null>(null);
-  const [compareSnapshot, setCompareSnapshot] = useState<Snapshot | null>(null);
-  const [changes, setChanges] = useState<any[]>([]);
-  const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [projectLoading, setProjectLoading] = useState(false);
-  const [showChangesPanel, setShowChangesPanel] = useState(false);
-  const [driftEvents, setDriftEvents] = useState<any[]>([]);
-  const [allDriftEvents, setAllDriftEvents] = useState<any[]>([]);
-  const [selectedDriftEvent, setSelectedDriftEvent] = useState<any>(null);
-
-  // Fetch projects on mount
-  useEffect(() => {
-    fetchProjects();
-  }, []);
-
-  // Fetch snapshots when project is selected
-  useEffect(() => {
-    if (selectedProject) {
-      // Immediately clear state and show loading
-      setProjectLoading(true);
-      setSelectedSnapshot(null);
-      setCompareSnapshot(null);
-      setChanges([]);
-      setSelectedResource(null);
-      setSnapshots([]);
-      setDriftEvents([]);
-      
-      // Small delay to ensure state is cleared
-      const timer = setTimeout(() => {
-        fetchSnapshots(selectedProject);
-        fetchDriftEvents(selectedProject);
-      }, 100);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [selectedProject]);
-
-  // Load the latest snapshot when snapshots are loaded
-  useEffect(() => {
-    if (snapshots.length > 0 && !selectedSnapshot) {
-      fetchSnapshotDetail(snapshots[0].id);
-      // Only set compare snapshot if there are multiple snapshots
-      if (snapshots.length > 1) {
-        setCompareSnapshot(snapshots[1]);
-      } else {
-        // Ensure compareSnapshot is null if only one snapshot
-        setCompareSnapshot(null);
-      }
-    }
-  }, [snapshots, selectedSnapshot]);
-
-  // Fetch changes when comparing snapshots
-  useEffect(() => {
-    if (compareSnapshot && selectedSnapshot && selectedSnapshot.projectName === compareSnapshot.projectName) {
-      // Only fetch changes if both snapshots are from the same project
-      fetchChanges(compareSnapshot.id, selectedSnapshot.id);
-    } else {
-      // Clear changes if no comparison or different projects
-      setChanges([]);
-    }
-  }, [compareSnapshot, selectedSnapshot]);
-
-  const fetchProjects = async () => {
-    try {
-      const res = await fetch('/api/projects');
-      const data = await res.json();
-      setProjects(data);
-      // Don't auto-select, let user choose
-      setLoading(false);
-    } catch (error) {
-      console.error('Failed to fetch projects:', error);
-      setLoading(false);
-    }
-  };
-
-  const fetchSnapshots = async (projectName: string) => {
-    try {
-      const res = await fetch(`/api/snapshots?project=${encodeURIComponent(projectName)}`);
-      const data = await res.json();
-      setSnapshots(data);
-    } catch (error) {
-      console.error('Failed to fetch snapshots:', error);
-    } finally {
-      setProjectLoading(false);
-    }
-  };
-
-  const fetchSnapshotDetail = async (snapshotId: string) => {
-    try {
-      const res = await fetch(`/api/snapshots/${snapshotId}`);
-      const data = await res.json();
-      setSelectedSnapshot(data);
-    } catch (error) {
-      console.error('Failed to fetch snapshot detail:', error);
-    }
-  };
-
-  const fetchChanges = async (fromId: string, toId: string) => {
-    try {
-      const res = await fetch(`/api/compare?from=${fromId}&to=${toId}`);
-      const data = await res.json();
-      setChanges(data.changes || []);
-    } catch (error) {
-      console.error('Failed to fetch changes:', error);
-    }
-  };
-
-  const fetchDriftEvents = async (projectName: string) => {
-    try {
-      // Fetch open events
-      const openRes = await fetch(`/api/drift?project=${encodeURIComponent(projectName)}&status=open`);
-      const openData = await openRes.json();
-      // Ensure it's an array
-      setDriftEvents(Array.isArray(openData) ? openData : []);
-      
-      // Fetch all events (for history)
-      const allRes = await fetch(`/api/drift?project=${encodeURIComponent(projectName)}`);
-      const allData = await allRes.json();
-      // Ensure it's an array
-      setAllDriftEvents(Array.isArray(allData) ? allData : []);
-    } catch (error) {
-      console.error('Failed to fetch drift events:', error);
-      // Set empty arrays on error
-      setDriftEvents([]);
-      setAllDriftEvents([]);
-    }
-  };
-
-  const handleAcknowledgeDrift = async (id: string) => {
-    try {
-      await fetch('/api/drift', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id,
-          acknowledgedBy: 'management@company.com',
-        }),
-      });
-      // Refresh drift events
-      if (selectedProject) {
-        fetchDriftEvents(selectedProject);
-      }
-    } catch (error) {
-      console.error('Failed to acknowledge drift:', error);
-    }
-  };
-
-  const handleAcknowledgeAllDrift = async (ids: string[]) => {
-    try {
-      // Acknowledge all events in parallel
-      await Promise.all(
-        ids.map(id =>
-          fetch('/api/drift', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id,
-              acknowledgedBy: 'management@company.com',
-            }),
-          })
-        )
-      );
-      // Refresh drift events
-      if (selectedProject) {
-        fetchDriftEvents(selectedProject);
-      }
-    } catch (error) {
-      console.error('Failed to acknowledge all drift events:', error);
-    }
-  };
-
-  const handleViewDriftDetails = (event: any) => {
-    setSelectedDriftEvent(event);
-  };
-
-  const handleSnapshotChange = (snapshotId: string) => {
-    fetchSnapshotDetail(snapshotId);
-    setSelectedResource(null);
-    
-    // Automatically set comparison to the next older version
-    const currentIndex = snapshots.findIndex(s => s.id === snapshotId);
-    if (currentIndex >= 0 && currentIndex < snapshots.length - 1) {
-      // Set compare to the next snapshot (older version)
-      setCompareSnapshot(snapshots[currentIndex + 1]);
-    } else {
-      // If it's the oldest snapshot, clear comparison
-      setCompareSnapshot(null);
-    }
-  };
-
-  const handleNodeClick = (resource: Resource) => {
-    setSelectedResource(resource);
-  };
-
-  const handleCloseDetail = () => {
-    setSelectedResource(null);
-  };
-
-  const getChangeForResource = (resource: Resource) => {
-    if (!changes.length) return undefined;
-    const address = `${resource.resourceType}.${resource.resourceName}`;
-    return changes.find((c) => c.address === address);
-  };
-
-  const handleResourceClickFromChanges = (address: string) => {
-    // Find the resource by address
-    const [type, name] = address.split('.');
-    const resource = selectedSnapshot?.resources.find(
-      (r) => r.resourceType === type && r.resourceName === name
-    );
-    if (resource) {
-      setSelectedResource(resource);
-      setShowChangesPanel(false);
-    }
-  };
-
-  // Get unique resource types in current project
-  const getResourceTypesInProject = () => {
-    if (!selectedSnapshot?.resources) return [];
-    
-    const typeMap = new Map<string, { icon: string; color: string; label: string }>();
-    
-    selectedSnapshot.resources.forEach((resource) => {
-      const type = resource.resourceType;
-      
-      if (type.includes('vpc')) {
-        typeMap.set('vpc', { icon: '🌐', color: '#bfdbfe', label: 'VPC' });
-      } else if (type.includes('subnet')) {
-        typeMap.set('subnet', { icon: '🔌', color: '#ddd6fe', label: 'Subnet' });
-      } else if (type.includes('instance') || type.includes('ec2')) {
-        typeMap.set('ec2', { icon: '🖥️', color: '#fecaca', label: 'EC2' });
-      } else if (type.includes('db') || type.includes('rds')) {
-        typeMap.set('db', { icon: '🗄️', color: '#c7d2fe', label: 'Database' });
-      } else if (type.includes('s3')) {
-        typeMap.set('s3', { icon: '📦', color: '#bbf7d0', label: 'S3' });
-      } else if (type.includes('security_group')) {
-        typeMap.set('security_group', { icon: '🛡️', color: '#fed7aa', label: 'Security Group' });
-      } else if (type.includes('lb') || type.includes('load_balancer') || type.includes('elb') || type.includes('alb')) {
-        typeMap.set('lb', { icon: '⚖️', color: '#fde68a', label: 'Load Balancer' });
-      } else if (type.includes('lambda')) {
-        typeMap.set('lambda', { icon: '⚡', color: '#fef08a', label: 'Lambda' });
-      } else if (type.includes('dynamodb')) {
-        typeMap.set('dynamodb', { icon: '📊', color: '#e9d5ff', label: 'DynamoDB' });
-      } else if (type.includes('api_gateway')) {
-        typeMap.set('api_gateway', { icon: '🔗', color: '#bae6fd', label: 'API Gateway' });
-      } else if (type.includes('iam')) {
-        typeMap.set('iam', { icon: '🔑', color: '#fecdd3', label: 'IAM' });
-      }
-    });
-    
-    return Array.from(typeMap.values());
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
-        <div className="text-center">
-          <div className="text-4xl mb-4">🐰</div>
-          <div className="text-xl font-semibold text-gray-700">Loading InfraBunny...</div>
-        </div>
-      </div>
-    );
-  }
-
-  // Loading spinner for project switch
-  const renderLoadingSpinner = () => (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-        <p className="mt-4 text-gray-600">Loading {selectedProject}...</p>
-      </div>
-    </div>
-  );
-
+export default function LandingPage() {
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="px-6 py-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      {/* Navigation */}
+      <nav className="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="text-3xl">🐰</div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">InfraBunny</h1>
-                <p className="text-sm text-gray-600">Cloud Resource Visualization</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4">
-              {/* Drift Indicator */}
-              {selectedProject && driftEvents.length > 0 && (
-                <div className="flex items-center space-x-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
-                  <svg className="h-5 w-5 text-orange-500" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
-                  <div className="flex flex-col">
-                    <span className="text-xs font-semibold text-orange-800">
-                      {driftEvents.length} Drift Event{driftEvents.length !== 1 ? 's' : ''}
-                    </span>
-                    <span className="text-xs text-orange-600">
-                      Requires attention
-                    </span>
-                  </div>
-                </div>
-              )}
-              <a
-                href="/admin"
-                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                title="Admin Panel"
+            <Link href="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
+              <Logo size={40} />
+              <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                InfraBunny
+              </span>
+            </Link>
+            <div className="flex items-center space-x-6">
+              <a href="#features" className="text-gray-600 hover:text-gray-900 transition-colors">Features</a>
+              <a href="#pricing" className="text-gray-600 hover:text-gray-900 transition-colors">Pricing</a>
+              <a href="#demo" className="text-gray-600 hover:text-gray-900 transition-colors">Demo</a>
+              <Link
+                href="/dashboard"
+                className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all transform hover:scale-105"
               >
-                <span className="text-xl">⚙️</span>
-              </a>
+                Try Demo →
+              </Link>
             </div>
           </div>
         </div>
-      </header>
+      </nav>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
-        <div className="w-80 bg-white border-r border-gray-200 overflow-y-auto">
-          <div className="p-4 space-y-6">
-            {/* Project Selector */}
-            <div>
-              <h2 className="text-sm font-semibold text-gray-700 mb-2">Projects</h2>
-              <div className="space-y-2">
-                {projects.map((project) => (
-                  <button
-                    key={project.name}
-                    onClick={() => setSelectedProject(project.name)}
-                    disabled={projectLoading}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
-                      selectedProject === project.name
-                        ? 'bg-blue-100 text-blue-900 font-medium'
-                        : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-                    } ${projectLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <div className="font-medium">{project.name}</div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {project.snapshotCount} snapshot{project.snapshotCount !== 1 ? 's' : ''}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Drift Events Alert */}
-            {selectedProject && allDriftEvents.length > 0 && (
-              <DriftAlert
-                driftEvents={driftEvents}
-                allDriftEvents={allDriftEvents}
-                onAcknowledge={handleAcknowledgeDrift}
-                onAcknowledgeAll={handleAcknowledgeAllDrift}
-                onViewDetails={handleViewDriftDetails}
-              />
-            )}
-
-            {/* Snapshot History */}
-            {snapshots.length > 0 && (
-              <div>
-                <h2 className="text-sm font-semibold text-gray-700 mb-2">Version History</h2>
-                <div className="space-y-2">
-                  {snapshots.map((snapshot, index) => {
-                    const isSelected = selectedSnapshot?.id === snapshot.id;
-                    const isComparing = compareSnapshot?.id === snapshot.id;
-                    
-                    return (
-                      <button
-                        key={snapshot.id}
-                        onClick={() => handleSnapshotChange(snapshot.id)}
-                        className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
-                          isSelected
-                            ? 'bg-blue-50 border-blue-300'
-                            : 'bg-white border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-medium text-gray-700">
-                            {index === 0 ? '● Current' : `○ Version ${snapshots.length - index}`}
-                          </div>
-                          <div className="flex gap-1">
-                            {isSelected && (
-                              <div className="text-xs font-semibold text-blue-600">Viewing</div>
-                            )}
-                            {isComparing && !isSelected && (
-                              <div className="text-xs font-semibold text-yellow-600">Comparing</div>
-                            )}
-                          </div>
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {formatDistanceToNow(new Date(snapshot.createdAt), { addSuffix: true })}
-                        </div>
-                        {snapshot._count && (
-                          <div className="text-xs text-gray-500 mt-1">
-                            {snapshot._count.resources} resources
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Compare Mode */}
-            {snapshots.length > 1 && (
-              <div>
-                <h2 className="text-sm font-semibold text-gray-700 mb-2">Compare With</h2>
-                <select
-                  value={compareSnapshot?.id || ''}
-                  onChange={(e) => {
-                    const snapshot = snapshots.find((s) => s.id === e.target.value);
-                    setCompareSnapshot(snapshot || null);
-                  }}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white"
-                >
-                  <option value="">No comparison</option>
-                  {snapshots
-                    .filter((s) => s.id !== selectedSnapshot?.id)
-                    .map((snapshot, index) => (
-                      <option key={snapshot.id} value={snapshot.id}>
-                        {formatDistanceToNow(new Date(snapshot.createdAt), { addSuffix: true })}
-                      </option>
-                    ))}
-                </select>
-
-                {changes.length > 0 && (
-                  <button
-                    onClick={() => setShowChangesPanel(true)}
-                    className="mt-3 w-full p-3 bg-yellow-50 hover:bg-yellow-100 border border-yellow-200 rounded-lg transition-colors text-left"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-xs font-semibold text-yellow-900">
-                        {changes.length} Change{changes.length !== 1 ? 's' : ''} Detected
-                      </div>
-                      <div className="text-yellow-700 text-xs">
-                        Click to view →
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      {changes.filter((c) => c.changeType === 'added').length > 0 && (
-                        <div className="text-xs text-green-700">
-                          + {changes.filter((c) => c.changeType === 'added').length} added
-                        </div>
-                      )}
-                      {changes.filter((c) => c.changeType === 'modified').length > 0 && (
-                        <div className="text-xs text-yellow-700">
-                          ~ {changes.filter((c) => c.changeType === 'modified').length} modified
-                        </div>
-                      )}
-                      {changes.filter((c) => c.changeType === 'deleted').length > 0 && (
-                        <div className="text-xs text-red-700">
-                          - {changes.filter((c) => c.changeType === 'deleted').length} deleted
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Legend - Only show when project is selected */}
-            {selectedProject && selectedSnapshot && (
-              <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                <h2 className="text-sm font-semibold text-gray-700 mb-3">Legend</h2>
-                
-                {/* Change Status - Only show if comparing versions */}
-                {changes.length > 0 && (
-                  <div className="mb-3">
-                    <div className="text-xs font-medium text-gray-600 mb-1">Changes:</div>
-                    <div className="space-y-1.5 text-xs">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 rounded border-2 border-green-400" style={{ borderWidth: '3px' }}></div>
-                        <span className="text-gray-700">Added</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 rounded border-2 border-yellow-400" style={{ borderWidth: '3px' }}></div>
-                        <span className="text-gray-700">Modified</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 rounded border-2 border-red-400" style={{ borderWidth: '3px' }}></div>
-                        <span className="text-gray-700">Deleted</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Resource Types - Dynamic based on current project */}
-                {getResourceTypesInProject().length > 0 && (
-                  <div>
-                    <div className="text-xs font-medium text-gray-600 mb-1">Resource Types:</div>
-                    <div className="space-y-1.5 text-xs">
-                      {getResourceTypesInProject().map((type) => (
-                        <div key={type.label} className="flex items-center space-x-2">
-                          <div className="w-4 h-4 rounded" style={{ backgroundColor: type.color }}></div>
-                          <span className="text-gray-700">{type.icon} {type.label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+      {/* Hero Section */}
+      <section className="relative overflow-hidden py-20 lg:py-32">
+        {/* Animated background elements */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-20 left-10 w-72 h-72 bg-blue-200 rounded-full mix-blend-multiply filter blur-xl opacity-30 animate-blob"></div>
+          <div className="absolute top-40 right-10 w-72 h-72 bg-purple-200 rounded-full mix-blend-multiply filter blur-xl opacity-30 animate-blob animation-delay-2000"></div>
+          <div className="absolute -bottom-8 left-1/2 w-72 h-72 bg-pink-200 rounded-full mix-blend-multiply filter blur-xl opacity-30 animate-blob animation-delay-4000"></div>
         </div>
 
-        {/* Graph Area */}
-        <div className="flex-1 relative">
-          {projectLoading ? (
-            renderLoadingSpinner()
-          ) : !selectedProject ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <div className="text-7xl mb-6">🐰</div>
-                <h2 className="text-2xl font-semibold text-gray-800 mb-3">Welcome to InfraBunny</h2>
-                <p className="text-gray-600 mb-6 max-w-md mx-auto">
-                  Visualize your cloud infrastructure with interactive diagrams and track changes across versions
-                </p>
-                <div className="inline-flex items-center space-x-2 text-blue-600 bg-blue-50 px-4 py-2 rounded-lg">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="max-w-7xl mx-auto px-6 relative">
+          <div className="text-center">
+            <div className="inline-block mb-6">
+              <Logo size={100} />
+            </div>
+            <h1 className="text-5xl lg:text-7xl font-bold text-gray-900 mb-6">
+              Visualize Your Cloud
+              <span className="block bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                Infrastructure at a Glance
+              </span>
+            </h1>
+            <p className="text-xl text-gray-600 mb-10 max-w-3xl mx-auto leading-relaxed">
+              Gain real-time visibility into your cloud resources, track every change,
+              and detect drift automatically.
+            </p>
+            <div className="flex items-center justify-center space-x-4">
+              <Link
+                href="/dashboard"
+                className="group px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-lg font-semibold rounded-xl hover:shadow-2xl transition-all transform hover:scale-105"
+              >
+                <span className="flex items-center space-x-2">
+                  <span>Start Free Demo</span>
+                  <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                   </svg>
-                  <span className="font-medium">Select a project from the sidebar to begin</span>
-                </div>
-              </div>
+                </span>
+              </Link>
+              <a
+                href="#demo"
+                className="px-8 py-4 bg-white text-gray-700 text-lg font-semibold rounded-xl border-2 border-gray-300 hover:border-blue-500 hover:shadow-lg transition-all"
+              >
+                Watch Demo
+              </a>
             </div>
-          ) : selectedSnapshot && selectedSnapshot.resources.length > 0 ? (
-            <ResourceGraph
-              resources={selectedSnapshot.resources}
-              changes={changes}
-              onNodeClick={handleNodeClick}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center text-gray-500">
-                <div className="text-6xl mb-4">📊</div>
-                <div className="text-lg">No resources to display</div>
-                <div className="text-sm mt-2">This project has no resources</div>
-              </div>
-            </div>
-          )}
+            <p className="mt-6 text-sm text-gray-500">
+              ✨ No credit card required • 🚀 Set up in 5 minutes • 🔒 Enterprise-grade security
+            </p>
+          </div>
         </div>
+      </section>
 
-        {/* Resource Detail Panel */}
-        {selectedResource && (
-          <ResourceDetail
-            resource={selectedResource}
-            change={getChangeForResource(selectedResource)}
-            onClose={handleCloseDetail}
-          />
-        )}
-      </div>
+      {/* Social Proof */}
+      <section className="bg-white py-12 border-y border-gray-200">
+        <div className="max-w-7xl mx-auto px-6">
+          <p className="text-center text-gray-500 text-sm mb-8">Trusted by innovative teams</p>
+          <div className="flex items-center justify-center space-x-12 opacity-50 grayscale">
+            <div className="text-2xl font-bold text-gray-400">TechCorp</div>
+            <div className="text-2xl font-bold text-gray-400">CloudScale</div>
+            <div className="text-2xl font-bold text-gray-400">DevOps Inc</div>
+            <div className="text-2xl font-bold text-gray-400">FinTech Pro</div>
+          </div>
+        </div>
+      </section>
 
-      {/* Changes Panel Modal */}
-      {showChangesPanel && (
-        <ChangesPanel
-          changes={changes}
-          onClose={() => setShowChangesPanel(false)}
-          onResourceClick={handleResourceClickFromChanges}
-        />
-      )}
+      {/* Features Section */}
+      <section id="features" className="py-20 bg-gradient-to-b from-white to-gray-50">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl lg:text-5xl font-bold text-gray-900 mb-4">
+              Complete Infrastructure Visibility
+            </h2>
+            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+              Real-time monitoring, change tracking, and drift detection in one beautiful dashboard
+            </p>
+          </div>
 
-      {/* Drift Detail Modal */}
-      <DriftDetailModal
-        event={selectedDriftEvent}
-        onClose={() => setSelectedDriftEvent(null)}
-      />
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {/* Feature 1 */}
+            <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-2xl transition-all transform hover:-translate-y-2 border border-gray-100">
+              <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mb-6 shadow-lg">
+                <span className="text-3xl">🌐</span>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-3">Interactive Architecture</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Visualize your entire infrastructure with nested VPCs, subnets, and resources. 
+                See dependencies at a glance with smart arrows and grouping.
+              </p>
+            </div>
+
+            {/* Feature 2 */}
+            <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-2xl transition-all transform hover:-translate-y-2 border border-gray-100">
+              <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center mb-6 shadow-lg">
+                <span className="text-3xl">📊</span>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-3">Version Tracking</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Track every infrastructure change with automatic version history. 
+                Compare versions side-by-side with color-coded diff visualization.
+              </p>
+            </div>
+
+            {/* Feature 3 */}
+            <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-2xl transition-all transform hover:-translate-y-2 border border-gray-100">
+              <div className="w-14 h-14 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl flex items-center justify-center mb-6 shadow-lg">
+                <span className="text-3xl">⚠️</span>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-3">Drift Detection</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Automatically detect when resources are modified outside Terraform. 
+                Get instant alerts with full details of who, what, when, and why.
+              </p>
+            </div>
+
+            {/* Feature 4 */}
+            <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-2xl transition-all transform hover:-translate-y-2 border border-gray-100">
+              <div className="w-14 h-14 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center mb-6 shadow-lg">
+                <span className="text-3xl">🔄</span>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-3">CI/CD Integration</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Seamlessly integrates with your existing deployment pipeline. 
+                Auto-create snapshots on every deployment via webhooks.
+              </p>
+            </div>
+
+            {/* Feature 5 */}
+            <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-2xl transition-all transform hover:-translate-y-2 border border-gray-100">
+              <div className="w-14 h-14 bg-gradient-to-br from-pink-500 to-pink-600 rounded-xl flex items-center justify-center mb-6 shadow-lg">
+                <span className="text-3xl">👥</span>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-3">Team Collaboration</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Track who made what changes and when. Full audit trail for compliance 
+                and governance with user attribution.
+              </p>
+            </div>
+
+            {/* Feature 6 */}
+            <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-2xl transition-all transform hover:-translate-y-2 border border-gray-100">
+              <div className="w-14 h-14 bg-gradient-to-br from-yellow-500 to-yellow-600 rounded-xl flex items-center justify-center mb-6 shadow-lg">
+                <span className="text-3xl">⚡</span>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-3">Real-Time Updates</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Infrastructure changes appear instantly. CloudTrail integration detects 
+                manual AWS Console modifications within seconds.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* How It Works */}
+      <section className="py-20 bg-white">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl lg:text-5xl font-bold text-gray-900 mb-4">
+              How It Works
+            </h2>
+            <p className="text-xl text-gray-600">Simple, automated, and powerful</p>
+          </div>
+
+          <div className="grid lg:grid-cols-3 gap-8 lg:gap-12">
+            {/* Step 1 */}
+            <div className="relative">
+              <div className="text-center">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 text-white text-2xl font-bold rounded-full mb-6 shadow-lg">
+                  1
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Connect Your Infrastructure</h3>
+                <p className="text-gray-600">
+                  Link your Terraform Cloud or CI/CD pipeline with a simple webhook URL. 
+                  Works with GitHub Actions, GitLab CI, and more.
+                </p>
+              </div>
+              {/* Arrow */}
+              <div className="hidden lg:block absolute top-8 -right-6 text-blue-300 text-4xl">→</div>
+            </div>
+
+            {/* Step 2 */}
+            <div className="relative">
+              <div className="text-center">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-purple-500 to-purple-600 text-white text-2xl font-bold rounded-full mb-6 shadow-lg">
+                  2
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Automatic Snapshots</h3>
+                <p className="text-gray-600">
+                  Every deployment automatically creates a versioned snapshot. 
+                  Changes are detected and visualized with color-coded diff view.
+                </p>
+              </div>
+              {/* Arrow */}
+              <div className="hidden lg:block absolute top-8 -right-6 text-purple-300 text-4xl">→</div>
+            </div>
+
+            {/* Step 3 */}
+              <div className="text-center">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-green-500 to-green-600 text-white text-2xl font-bold rounded-full mb-6 shadow-lg">
+                  3
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Monitor & Alert</h3>
+                <p className="text-gray-600">
+                  Get instant visibility into all infrastructure changes. 
+                  Drift detection alerts when resources are modified outside Terraform.
+                </p>
+              </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing Section */}
+      <section id="pricing" className="py-20 bg-gradient-to-b from-gray-50 to-white">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl lg:text-5xl font-bold text-gray-900 mb-4">
+              Simple, Transparent Pricing
+            </h2>
+            <p className="text-xl text-gray-600">Choose the plan that fits your team</p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+            {/* Free Tier */}
+            <div className="bg-white rounded-2xl p-8 shadow-lg border-2 border-gray-200 hover:border-blue-400 transition-all">
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">Free</h3>
+              <div className="mb-6">
+                <span className="text-5xl font-bold text-gray-900">$0</span>
+                <span className="text-gray-600">/month</span>
+              </div>
+              <ul className="space-y-4 mb-8">
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">Up to 3 projects</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">50 resources per project</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">30-day version history</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">Basic drift detection</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">Community support</span>
+                </li>
+              </ul>
+              <Link
+                href="/dashboard"
+                className="block w-full text-center px-6 py-3 bg-gray-100 text-gray-900 font-semibold rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Get Started
+              </Link>
+            </div>
+
+            {/* Pro Tier - Highlighted */}
+            <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-8 shadow-2xl transform scale-105 relative">
+              <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                <span className="bg-yellow-400 text-yellow-900 text-xs font-bold px-4 py-1 rounded-full shadow-lg">
+                  MOST POPULAR
+                </span>
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">Professional</h3>
+              <div className="mb-6">
+                <span className="text-5xl font-bold text-white">$49</span>
+                <span className="text-blue-100">/month</span>
+              </div>
+              <ul className="space-y-4 mb-8">
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-white">Unlimited projects</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-white">Unlimited resources</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-white">Unlimited version history</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-white">Real-time drift detection</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-white">Slack/email notifications</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-white">Priority support</span>
+                </li>
+              </ul>
+              <Link
+                href="/dashboard"
+                className="block w-full text-center px-6 py-3 bg-white text-blue-600 font-semibold rounded-lg hover:shadow-lg transition-all"
+              >
+                Start Free Trial
+              </Link>
+            </div>
+
+            {/* Enterprise Tier */}
+            <div className="bg-white rounded-2xl p-8 shadow-lg border-2 border-gray-200 hover:border-purple-400 transition-all">
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">Enterprise</h3>
+              <div className="mb-6">
+                <span className="text-5xl font-bold text-gray-900">Custom</span>
+              </div>
+              <ul className="space-y-4 mb-8">
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">Everything in Pro</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">Multi-account support</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">SSO & RBAC</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">Custom integrations</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">SLA guarantees</span>
+                </li>
+                <li className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-gray-600">Dedicated support</span>
+                </li>
+              </ul>
+              <button className="block w-full text-center px-6 py-3 bg-gray-100 text-gray-900 font-semibold rounded-lg hover:bg-gray-200 transition-colors">
+                Contact Sales
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Demo CTA Section */}
+      <section id="demo" className="py-20 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <h2 className="text-4xl lg:text-5xl font-bold mb-6">
+            Ready to See It in Action?
+          </h2>
+          <p className="text-xl text-blue-100 mb-10">
+            Try our interactive demo with sample infrastructure. No signup required.
+          </p>
+          <Link
+            href="/dashboard"
+            className="inline-block px-10 py-4 bg-white text-blue-600 text-lg font-bold rounded-xl hover:shadow-2xl transition-all transform hover:scale-105"
+          >
+            Launch Demo Dashboard →
+          </Link>
+          <p className="mt-6 text-blue-100 text-sm">
+            Explore live examples of e-commerce and analytics platforms
+          </p>
+        </div>
+      </section>
+
+      {/* Use Cases */}
+      <section className="py-20 bg-white">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl lg:text-5xl font-bold text-gray-900 mb-4">
+              Built for Modern Teams
+            </h2>
+            <p className="text-xl text-gray-600">See how InfraBunny helps different roles</p>
+          </div>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 border border-blue-200">
+              <div className="text-4xl mb-4">👔</div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Leadership</h3>
+              <p className="text-sm text-gray-600">
+                High-level infrastructure overview without technical complexity
+              </p>
+            </div>
+            <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200">
+              <div className="text-4xl mb-4">👨‍💻</div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">DevOps Teams</h3>
+              <p className="text-sm text-gray-600">
+                Track deployments, debug issues, understand dependencies
+              </p>
+            </div>
+            <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6 border border-green-200">
+              <div className="text-4xl mb-4">🔒</div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Security Teams</h3>
+              <p className="text-sm text-gray-600">
+                Detect unauthorized changes, audit compliance, enforce policies
+              </p>
+            </div>
+            <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl p-6 border border-orange-200">
+              <div className="text-4xl mb-4">💰</div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Finance</h3>
+              <p className="text-sm text-gray-600">
+                Monitor resource growth, track cost changes over time
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Final CTA */}
+      <section className="py-20 bg-gray-50">
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <div className="bg-white rounded-3xl shadow-2xl p-12 border border-gray-100">
+            <div className="flex justify-center mb-6">
+              <Logo size={80} />
+            </div>
+            <h2 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">
+              Start Visualizing Today
+            </h2>
+            <p className="text-lg text-gray-600 mb-8">
+              Join teams who trust InfraBunny to monitor their cloud infrastructure
+            </p>
+            <div className="flex items-center justify-center space-x-4">
+              <Link
+                href="/dashboard"
+                className="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-lg font-semibold rounded-xl hover:shadow-2xl transition-all transform hover:scale-105"
+              >
+                Try Free Demo
+              </Link>
+              <button className="px-8 py-4 bg-white text-gray-700 text-lg font-semibold rounded-xl border-2 border-gray-300 hover:border-blue-500 transition-all">
+                Schedule Demo
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="bg-gray-900 text-gray-400 py-12">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="grid md:grid-cols-4 gap-8 mb-8">
+            <div>
+              <div className="flex items-center space-x-2 mb-4">
+                <Logo size={32} />
+                <span className="text-white font-bold text-lg">InfraBunny</span>
+              </div>
+              <p className="text-sm">
+                Cloud infrastructure visualization and monitoring for modern teams.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-white font-semibold mb-4">Product</h3>
+              <ul className="space-y-2 text-sm">
+                <li><a href="#features" className="hover:text-white transition-colors">Features</a></li>
+                <li><a href="#pricing" className="hover:text-white transition-colors">Pricing</a></li>
+                <li><Link href="/dashboard" className="hover:text-white transition-colors">Demo</Link></li>
+                <li><a href="#" className="hover:text-white transition-colors">Documentation</a></li>
+              </ul>
+            </div>
+            <div>
+              <h3 className="text-white font-semibold mb-4">Company</h3>
+              <ul className="space-y-2 text-sm">
+                <li><a href="#" className="hover:text-white transition-colors">About</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Blog</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Careers</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Contact</a></li>
+              </ul>
+            </div>
+            <div>
+              <h3 className="text-white font-semibold mb-4">Legal</h3>
+              <ul className="space-y-2 text-sm">
+                <li><a href="#" className="hover:text-white transition-colors">Privacy</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Terms</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Security</a></li>
+              </ul>
+            </div>
+          </div>
+          <div className="border-t border-gray-800 pt-8 text-center text-sm">
+            <p>© 2025 InfraBunny. All rights reserved. Built for hackathons with ❤️</p>
+          </div>
+        </div>
+      </footer>
+
+      {/* Custom animations */}
+      <style jsx>{`
+        @keyframes blob {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          25% { transform: translate(20px, -20px) scale(1.1); }
+          50% { transform: translate(-20px, 20px) scale(0.9); }
+          75% { transform: translate(20px, 20px) scale(1.05); }
+        }
+        .animate-blob {
+          animation: blob 7s infinite;
+        }
+        .animation-delay-2000 {
+          animation-delay: 2s;
+        }
+        .animation-delay-4000 {
+          animation-delay: 4s;
+        }
+      `}</style>
     </div>
   );
 }
-
