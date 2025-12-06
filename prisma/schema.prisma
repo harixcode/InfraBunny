@@ -61,3 +61,25 @@ model Change {
   @@index([toSnapshotId])
 }
 
+model DriftEvent {
+  id              String   @id @default(uuid())
+  projectName     String
+  resourceType    String   // e.g., "aws_instance"
+  resourceName    String   // e.g., "web-server-1"
+  resourceId      String   // e.g., "i-abc123"
+  
+  detectedAt      DateTime @default(now())
+  modifiedBy      String   // User who made the change
+  modifiedVia     String   // "console", "cli", "api"
+  changeType      String   // "security_group_modified", "tag_added", "config_changed"
+  changeDetail    String   // JSON string of what changed
+  
+  status          String   @default("open") // "open", "acknowledged", "reverted"
+  acknowledgedBy  String?
+  acknowledgedAt  DateTime?
+
+  @@index([projectName])
+  @@index([status])
+  @@index([detectedAt])
+}
+

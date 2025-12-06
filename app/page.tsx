@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import ResourceGraph from '@/components/ResourceGraph';
 import ResourceDetail from '@/components/ResourceDetail';
 import ChangesPanel from '@/components/ChangesPanel';
+import DriftAlert from '@/components/DriftAlert';
+import DriftDetailModal from '@/components/DriftDetailModal';
 import { formatDistanceToNow } from 'date-fns';
 
 interface Project {
@@ -44,7 +46,11 @@ export default function Home() {
   const [changes, setChanges] = useState<any[]>([]);
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [loading, setLoading] = useState(true);
+  const [projectLoading, setProjectLoading] = useState(false);
   const [showChangesPanel, setShowChangesPanel] = useState(false);
+  const [driftEvents, setDriftEvents] = useState<any[]>([]);
+  const [allDriftEvents, setAllDriftEvents] = useState<any[]>([]);
+  const [selectedDriftEvent, setSelectedDriftEvent] = useState<any>(null);
 
   // Fetch projects on mount
   useEffect(() => {
@@ -54,12 +60,22 @@ export default function Home() {
   // Fetch snapshots when project is selected
   useEffect(() => {
     if (selectedProject) {
-      // Reset state when switching projects
+      // Immediately clear state and show loading
+      setProjectLoading(true);
       setSelectedSnapshot(null);
       setCompareSnapshot(null);
       setChanges([]);
       setSelectedResource(null);
-      fetchSnapshots(selectedProject);
+      setSnapshots([]);
+      setDriftEvents([]);
+      
+      // Small delay to ensure state is cleared
+      const timer = setTimeout(() => {
+        fetchSnapshots(selectedProject);
+        fetchDriftEvents(selectedProject);
+      }, 100);
+      
+      return () => clearTimeout(timer);
     }
   }, [selectedProject]);
 
@@ -93,9 +109,7 @@ export default function Home() {
       const res = await fetch('/api/projects');
       const data = await res.json();
       setProjects(data);
-      if (data.length > 0) {
-        setSelectedProject(data[0].name);
-      }
+      // Don't auto-select, let user choose
       setLoading(false);
     } catch (error) {
       console.error('Failed to fetch projects:', error);
@@ -110,6 +124,8 @@ export default function Home() {
       setSnapshots(data);
     } catch (error) {
       console.error('Failed to fetch snapshots:', error);
+    } finally {
+      setProjectLoading(false);
     }
   };
 
@@ -131,6 +147,69 @@ export default function Home() {
     } catch (error) {
       console.error('Failed to fetch changes:', error);
     }
+  };
+
+  const fetchDriftEvents = async (projectName: string) => {
+    try {
+      // Fetch open events
+      const openRes = await fetch(`/api/drift?project=${encodeURIComponent(projectName)}&status=open`);
+      const openData = await openRes.json();
+      setDriftEvents(openData);
+      
+      // Fetch all events (for history)
+      const allRes = await fetch(`/api/drift?project=${encodeURIComponent(projectName)}`);
+      const allData = await allRes.json();
+      setAllDriftEvents(allData);
+    } catch (error) {
+      console.error('Failed to fetch drift events:', error);
+    }
+  };
+
+  const handleAcknowledgeDrift = async (id: string) => {
+    try {
+      await fetch('/api/drift', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          acknowledgedBy: 'management@company.com',
+        }),
+      });
+      // Refresh drift events
+      if (selectedProject) {
+        fetchDriftEvents(selectedProject);
+      }
+    } catch (error) {
+      console.error('Failed to acknowledge drift:', error);
+    }
+  };
+
+  const handleAcknowledgeAllDrift = async (ids: string[]) => {
+    try {
+      // Acknowledge all events in parallel
+      await Promise.all(
+        ids.map(id =>
+          fetch('/api/drift', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id,
+              acknowledgedBy: 'management@company.com',
+            }),
+          })
+        )
+      );
+      // Refresh drift events
+      if (selectedProject) {
+        fetchDriftEvents(selectedProject);
+      }
+    } catch (error) {
+      console.error('Failed to acknowledge all drift events:', error);
+    }
+  };
+
+  const handleViewDriftDetails = (event: any) => {
+    setSelectedDriftEvent(event);
   };
 
   const handleSnapshotChange = (snapshotId: string) => {
@@ -174,6 +253,43 @@ export default function Home() {
     }
   };
 
+  // Get unique resource types in current project
+  const getResourceTypesInProject = () => {
+    if (!selectedSnapshot?.resources) return [];
+    
+    const typeMap = new Map<string, { icon: string; color: string; label: string }>();
+    
+    selectedSnapshot.resources.forEach((resource) => {
+      const type = resource.resourceType;
+      
+      if (type.includes('vpc')) {
+        typeMap.set('vpc', { icon: '🌐', color: '#bfdbfe', label: 'VPC' });
+      } else if (type.includes('subnet')) {
+        typeMap.set('subnet', { icon: '🔌', color: '#ddd6fe', label: 'Subnet' });
+      } else if (type.includes('instance') || type.includes('ec2')) {
+        typeMap.set('ec2', { icon: '🖥️', color: '#fecaca', label: 'EC2' });
+      } else if (type.includes('db') || type.includes('rds')) {
+        typeMap.set('db', { icon: '🗄️', color: '#c7d2fe', label: 'Database' });
+      } else if (type.includes('s3')) {
+        typeMap.set('s3', { icon: '📦', color: '#bbf7d0', label: 'S3' });
+      } else if (type.includes('security_group')) {
+        typeMap.set('security_group', { icon: '🛡️', color: '#fed7aa', label: 'Security Group' });
+      } else if (type.includes('lb') || type.includes('load_balancer') || type.includes('elb') || type.includes('alb')) {
+        typeMap.set('lb', { icon: '⚖️', color: '#fde68a', label: 'Load Balancer' });
+      } else if (type.includes('lambda')) {
+        typeMap.set('lambda', { icon: '⚡', color: '#fef08a', label: 'Lambda' });
+      } else if (type.includes('dynamodb')) {
+        typeMap.set('dynamodb', { icon: '📊', color: '#e9d5ff', label: 'DynamoDB' });
+      } else if (type.includes('api_gateway')) {
+        typeMap.set('api_gateway', { icon: '🔗', color: '#bae6fd', label: 'API Gateway' });
+      } else if (type.includes('iam')) {
+        typeMap.set('iam', { icon: '🔑', color: '#fecdd3', label: 'IAM' });
+      }
+    });
+    
+    return Array.from(typeMap.values());
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
@@ -184,6 +300,16 @@ export default function Home() {
       </div>
     );
   }
+
+  // Loading spinner for project switch
+  const renderLoadingSpinner = () => (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+        <p className="mt-4 text-gray-600">Loading {selectedProject}...</p>
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -197,6 +323,31 @@ export default function Home() {
                 <h1 className="text-2xl font-bold text-gray-900">InfraBunny</h1>
                 <p className="text-sm text-gray-600">Cloud Resource Visualization</p>
               </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              {/* Drift Indicator */}
+              {selectedProject && driftEvents.length > 0 && (
+                <div className="flex items-center space-x-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
+                  <svg className="h-5 w-5 text-orange-500" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-orange-800">
+                      {driftEvents.length} Drift Event{driftEvents.length !== 1 ? 's' : ''}
+                    </span>
+                    <span className="text-xs text-orange-600">
+                      Requires attention
+                    </span>
+                  </div>
+                </div>
+              )}
+              <a
+                href="/admin"
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Admin Panel"
+              >
+                <span className="text-xl">⚙️</span>
+              </a>
             </div>
           </div>
         </div>
@@ -215,11 +366,12 @@ export default function Home() {
                   <button
                     key={project.name}
                     onClick={() => setSelectedProject(project.name)}
+                    disabled={projectLoading}
                     className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
                       selectedProject === project.name
                         ? 'bg-blue-100 text-blue-900 font-medium'
                         : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-                    }`}
+                    } ${projectLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <div className="font-medium">{project.name}</div>
                     <div className="text-xs text-gray-500 mt-1">
@@ -229,6 +381,17 @@ export default function Home() {
                 ))}
               </div>
             </div>
+
+            {/* Drift Events Alert */}
+            {selectedProject && allDriftEvents.length > 0 && (
+              <DriftAlert
+                driftEvents={driftEvents}
+                allDriftEvents={allDriftEvents}
+                onAcknowledge={handleAcknowledgeDrift}
+                onAcknowledgeAll={handleAcknowledgeAllDrift}
+                onViewDetails={handleViewDriftDetails}
+              />
+            )}
 
             {/* Snapshot History */}
             {snapshots.length > 0 && (
@@ -334,66 +497,72 @@ export default function Home() {
               </div>
             )}
 
-            {/* Legend */}
-            <div>
-              <h2 className="text-sm font-semibold text-gray-700 mb-3">Color Legend</h2>
-              
-              {/* Change Status */}
-              <div className="mb-3">
-                <div className="text-xs font-medium text-gray-600 mb-1">Changes:</div>
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: '#86efac' }}></div>
-                    <span className="text-gray-700">Added</span>
+            {/* Legend - Only show when project is selected */}
+            {selectedProject && selectedSnapshot && (
+              <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                <h2 className="text-sm font-semibold text-gray-700 mb-3">Legend</h2>
+                
+                {/* Change Status - Only show if comparing versions */}
+                {changes.length > 0 && (
+                  <div className="mb-3">
+                    <div className="text-xs font-medium text-gray-600 mb-1">Changes:</div>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 rounded border-2 border-green-400" style={{ borderWidth: '3px' }}></div>
+                        <span className="text-gray-700">Added</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 rounded border-2 border-yellow-400" style={{ borderWidth: '3px' }}></div>
+                        <span className="text-gray-700">Modified</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 rounded border-2 border-red-400" style={{ borderWidth: '3px' }}></div>
+                        <span className="text-gray-700">Deleted</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: '#fbbf24' }}></div>
-                    <span className="text-gray-700">Modified</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: '#f87171' }}></div>
-                    <span className="text-gray-700">Deleted</span>
-                  </div>
-                </div>
-              </div>
+                )}
 
-              {/* Resource Types */}
-              <div>
-                <div className="text-xs font-medium text-gray-600 mb-1">Resource Types:</div>
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: '#bfdbfe' }}></div>
-                    <span className="text-gray-700">🌐 VPC</span>
+                {/* Resource Types - Dynamic based on current project */}
+                {getResourceTypesInProject().length > 0 && (
+                  <div>
+                    <div className="text-xs font-medium text-gray-600 mb-1">Resource Types:</div>
+                    <div className="space-y-1.5 text-xs">
+                      {getResourceTypesInProject().map((type) => (
+                        <div key={type.label} className="flex items-center space-x-2">
+                          <div className="w-4 h-4 rounded" style={{ backgroundColor: type.color }}></div>
+                          <span className="text-gray-700">{type.icon} {type.label}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ddd6fe' }}></div>
-                    <span className="text-gray-700">🔌 Subnet</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: '#fecaca' }}></div>
-                    <span className="text-gray-700">🖥️ EC2</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: '#c7d2fe' }}></div>
-                    <span className="text-gray-700">🗄️ Database</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: '#bbf7d0' }}></div>
-                    <span className="text-gray-700">📦 S3</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: '#fed7aa' }}></div>
-                    <span className="text-gray-700">🛡️ Security</span>
-                  </div>
-                </div>
+                )}
               </div>
-            </div>
+            )}
           </div>
         </div>
 
         {/* Graph Area */}
         <div className="flex-1 relative">
-          {selectedSnapshot && selectedSnapshot.resources.length > 0 ? (
+          {projectLoading ? (
+            renderLoadingSpinner()
+          ) : !selectedProject ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <div className="text-7xl mb-6">🐰</div>
+                <h2 className="text-2xl font-semibold text-gray-800 mb-3">Welcome to InfraBunny</h2>
+                <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                  Visualize your cloud infrastructure with interactive diagrams and track changes across versions
+                </p>
+                <div className="inline-flex items-center space-x-2 text-blue-600 bg-blue-50 px-4 py-2 rounded-lg">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                  <span className="font-medium">Select a project from the sidebar to begin</span>
+                </div>
+              </div>
+            </div>
+          ) : selectedSnapshot && selectedSnapshot.resources.length > 0 ? (
             <ResourceGraph
               resources={selectedSnapshot.resources}
               changes={changes}
@@ -404,7 +573,7 @@ export default function Home() {
               <div className="text-center text-gray-500">
                 <div className="text-6xl mb-4">📊</div>
                 <div className="text-lg">No resources to display</div>
-                <div className="text-sm mt-2">Select a project with resources</div>
+                <div className="text-sm mt-2">This project has no resources</div>
               </div>
             </div>
           )}
@@ -428,6 +597,12 @@ export default function Home() {
           onResourceClick={handleResourceClickFromChanges}
         />
       )}
+
+      {/* Drift Detail Modal */}
+      <DriftDetailModal
+        event={selectedDriftEvent}
+        onClose={() => setSelectedDriftEvent(null)}
+      />
     </div>
   );
 }
