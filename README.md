@@ -18,6 +18,7 @@ A Cloud Resource Visualization Tool built for management to monitor and track in
 - **Backend**: Next.js API Routes
 - **Database**: SQLite with Prisma ORM
 - **Mock Data**: Sample Terraform state files (no real AWS account needed!)
+- **Dev Tooling**: Cursor (AI-assisted coding) for faster iteration
 
 ## 🚀 Getting Started
 
